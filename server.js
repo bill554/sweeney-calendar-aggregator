@@ -12,6 +12,22 @@ const port = process.env.PORT || 3000;
 
 const TZ = process.env.TIMEZONE || "America/New_York";
 
+function getCalendarIds() {
+  const ids = (process.env.GOOGLE_CALENDAR_IDS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // Backward compatible with your current single-calendar setup
+  if (ids.length === 0 && process.env.GOOGLE_CALENDAR_ID) {
+    return [process.env.GOOGLE_CALENDAR_ID.trim()];
+  }
+  if (ids.length === 0) {
+    throw new Error("Missing GOOGLE_CALENDAR_IDS (or GOOGLE_CALENDAR_ID)");
+  }
+  return ids;
+}
+
 function getJwtClient() {
   if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
     throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_JSON");
@@ -81,3 +97,4 @@ app.get("/events", async (req, res) => {
 app.listen(port, () => {
   console.log(`calendar-aggregator listening on :${port}`);
 });
+
