@@ -5,28 +5,12 @@ import { DateTime } from "luxon";
 const app = express();
 const port = process.env.PORT || 3000;
 
-// REQUIRED ENV VARS
-// GOOGLE_SERVICE_ACCOUNT_JSON: the full JSON key contents
-// GOOGLE_CALENDAR_ID: calendar ID (often your gmail or the calendar's ID in settings)
-// TIMEZONE: e.g. America/New_York (optional; defaults to America/New_York)
-
 const TZ = process.env.TIMEZONE || "America/New_York";
 
-function getCalendarIds() {
-  const ids = (process.env.GOOGLE_CALENDAR_IDS || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  // Backward compatible with your current single-calendar setup
-  if (ids.length === 0 && process.env.GOOGLE_CALENDAR_ID) {
-    return [process.env.GOOGLE_CALENDAR_ID.trim()];
-  }
-  if (ids.length === 0) {
-    throw new Error("Missing GOOGLE_CALENDAR_IDS (or GOOGLE_CALENDAR_ID)");
-  }
-  return ids;
-}
+// REQUIRED ENV VARS
+// GOOGLE_SERVICE_ACCOUNT_JSON: full JSON key contents
+// GOOGLE_CALENDAR_IDS: comma-separated calendar IDs (preferred)
+// (or legacy) GOOGLE_CALENDAR_ID: single calendar ID
 
 function getJwtClient() {
   if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
@@ -41,7 +25,25 @@ function getJwtClient() {
   });
 }
 
-app.get("/health", (_req, res) => res.json({ status: "ok" }));
+function getCalendarIds() {
+  const ids = (process.env.GOOGLE_CALENDAR_IDS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // Backward compatible: allow old single-calendar env var
+  if (ids.length === 0 && process.env.GOOGLE_CALENDAR_ID) {
+    return [process.env.GOOGLE_CALENDAR_ID.trim()];
+  }
+  if (ids.length === 0) {
+    throw new Error("Missing GOOGLE_CALENDAR_IDS (or GOOGLE_CALENDAR_ID)");
+  }
+  return ids;
+}
+
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok" });
+});
 
 app.get("/events", async (req, res) => {
   try {
@@ -55,7 +57,6 @@ app.get("/events", async (req, res) => {
 
     const calendarIds = getCalendarIds();
 
-    // Fetch in parallel; don't fail everything if one calendar errors
     const settled = await Promise.allSettled(
       calendarIds.map(async (calendarId) => {
         const resp = await calendar.events.list({
@@ -69,7 +70,7 @@ app.get("/events", async (req, res) => {
 
         const items = resp.data.items || [];
         const events = items.map((e) => {
-          const start = e.start?.dateTime || e.start?.date; // all-day if .date
+          const start = e.start?.dateTime || e.start?.date;
           const end = e.end?.dateTime || e.end?.date;
 
           return {
@@ -114,36 +115,6 @@ app.get("/events", async (req, res) => {
   }
 });
 
-    // Normalize shape for display
-    const events = items.map((e) => {
-      const start = e.start?.dateTime || e.start?.date; // date = all-day
-      const end = e.end?.dateTime || e.end?.date;
-
-      return {
-        id: e.id,
-        title: e.summary || "(no title)",
-        location: e.location || "",
-        description: e.description || "",
-        allDay: Boolean(e.start?.date),
-        start,
-        end
-      };
-    });
-
-    res.json({
-      timezone: TZ,
-      range: { days, timeMin, timeMax },
-      count: events.length,
-      events
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message || String(err) });
-  }
-});
-
 app.listen(port, () => {
   console.log(`calendar-aggregator listening on :${port}`);
 });
-
-
-
