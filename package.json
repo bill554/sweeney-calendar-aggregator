@@ -1,0 +1,14 @@
+{
+  "name": "sweeney-calendar-aggregator",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "googleapis": "^140.0.0",
+    "luxon": "^3.5.0"
+  }
+}
