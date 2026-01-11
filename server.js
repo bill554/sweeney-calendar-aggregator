@@ -115,6 +115,92 @@ app.get("/events", async (req, res) => {
   }
 });
 
+function formatEventTime(startIso, allDay) {
+  if (allDay) return "All day";
+  const dt = DateTime.fromISO(startIso, { zone: TZ });
+  return dt.isValid ? dt.toFormat("h:mm a") : "";
+}
+
+app.get("/wall", async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days || "10", 10), 60);
+
+    const now = DateTime.now().setZone(TZ);
+    const timeMin = now.toUTC().toISO();
+    const timeMax = now.plus({ days }).toUTC().toISO();
+
+    const auth = getJwtClient();
+    const calendar = google.calendar({ version: "v3", auth });
+    const calendarIds = getCalendarIds();
+
+    const settled = await Promise.allSettled(
+      calendarIds.map(async (calendarId) => {
+        const resp = await calendar.events.list({
+          calendarId,
+          timeMin,
+          timeMax,
+          singleEvents: true,
+          orderBy: "startTime",
+          maxResults: 2500
+        });
+
+        const items = resp.data.items || [];
+        return items.map((e) => {
+          const start = e.start?.dateTime || e.start?.date;
+          const end = e.end?.dateTime || e.end?.date;
+          const allDay = Boolean(e.start?.date);
+
+          return {
+            sourceCalendarId: calendarId,
+            id: `${calendarId}:${e.id}`,
+            title: e.summary || "(no title)",
+            allDay,
+            start,
+            end,
+            displayTime: formatEventTime(start, allDay)
+          };
+        });
+      })
+    );
+
+    const errors = settled
+      .filter((r) => r.status === "rejected")
+      .map((r) => String(r.reason?.message || r.reason || "unknown error"));
+
+    const events = settled
+      .filter((r) => r.status === "fulfilled")
+      .flatMap((r) => r.value)
+      .sort((a, b) => (a.start || "").localeCompare(b.start || ""));
+
+    const todayKey = now.toISODate();
+    const today = [];
+    const upcoming = [];
+
+    for (const e of events) {
+      const startDt = DateTime.fromISO(e.start, { zone: TZ });
+      const startKey = startDt.isValid ? startDt.toISODate() : "";
+      if (startKey === todayKey) today.push(e);
+      else upcoming.push(e);
+    }
+
+    res.json({
+      timezone: TZ,
+      calendars: calendarIds,
+      days,
+      todayKey,
+      todayCount: today.length,
+      upcomingCount: upcoming.length,
+      today,
+      upcoming,
+      errors
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+
 app.listen(port, () => {
   console.log(`calendar-aggregator listening on :${port}`);
 });
+
