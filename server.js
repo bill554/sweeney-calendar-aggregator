@@ -55,7 +55,7 @@ app.get("/events", async (req, res) => {
 
     const calendarIds = getCalendarIds();
 
-    // Fetch calendars in parallel, but don't fail the whole response if one calendar errors
+    // Fetch in parallel; don't fail everything if one calendar errors
     const settled = await Promise.allSettled(
       calendarIds.map(async (calendarId) => {
         const resp = await calendar.events.list({
@@ -144,5 +144,6 @@ app.get("/events", async (req, res) => {
 app.listen(port, () => {
   console.log(`calendar-aggregator listening on :${port}`);
 });
+
 
 
