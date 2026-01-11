@@ -45,9 +45,6 @@ app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
 app.get("/events", async (req, res) => {
   try {
-    const calendarId = process.env.GOOGLE_CALENDAR_ID;
-    if (!calendarId) throw new Error("Missing GOOGLE_CALENDAR_ID");
-
     const days = Math.min(parseInt(req.query.days || "30", 10), 365);
     const now = DateTime.now().setZone(TZ);
     const timeMin = now.toUTC().toISO();
@@ -56,16 +53,66 @@ app.get("/events", async (req, res) => {
     const auth = getJwtClient();
     const calendar = google.calendar({ version: "v3", auth });
 
-    const resp = await calendar.events.list({
-      calendarId,
-      timeMin,
-      timeMax,
-      singleEvents: true,
-      orderBy: "startTime",
-      maxResults: 2500
-    });
+    const calendarIds = getCalendarIds();
 
-    const items = resp.data.items || [];
+    // Fetch calendars in parallel, but don't fail the whole response if one calendar errors
+    const settled = await Promise.allSettled(
+      calendarIds.map(async (calendarId) => {
+        const resp = await calendar.events.list({
+          calendarId,
+          timeMin,
+          timeMax,
+          singleEvents: true,
+          orderBy: "startTime",
+          maxResults: 2500
+        });
+
+        const items = resp.data.items || [];
+        const events = items.map((e) => {
+          const start = e.start?.dateTime || e.start?.date; // all-day if .date
+          const end = e.end?.dateTime || e.end?.date;
+
+          return {
+            sourceCalendarId: calendarId,
+            id: `${calendarId}:${e.id}`,
+            title: e.summary || "(no title)",
+            location: e.location || "",
+            description: e.description || "",
+            allDay: Boolean(e.start?.date),
+            start,
+            end
+          };
+        });
+
+        return { calendarId, events };
+      })
+    );
+
+    const errors = settled
+      .filter((r) => r.status === "rejected")
+      .map((r) => String(r.reason?.message || r.reason || "unknown error"));
+
+    const fulfilled = settled
+      .filter((r) => r.status === "fulfilled")
+      .map((r) => r.value);
+
+    const events = fulfilled
+      .flatMap((x) => x.events)
+      .sort((a, b) => (a.start || "").localeCompare(b.start || ""));
+
+    res.json({
+      timezone: TZ,
+      calendarsRequested: calendarIds,
+      calendarsSucceeded: fulfilled.map((f) => f.calendarId),
+      errors,
+      range: { days, timeMin, timeMax },
+      count: events.length,
+      events
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
 
     // Normalize shape for display
     const events = items.map((e) => {
@@ -97,4 +144,5 @@ app.get("/events", async (req, res) => {
 app.listen(port, () => {
   console.log(`calendar-aggregator listening on :${port}`);
 });
+
 
